@@ -1,0 +1,7 @@
+python-telegram-bot==21.7
+gspread==6.0.2
+google-auth==2.27.0
+google-auth-oauthlib==1.2.0
+pytz==2024.1
+nest-asyncio==1.5.8
+python-dotenv==1.0.1
