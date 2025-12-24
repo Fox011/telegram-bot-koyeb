@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 🤖 ТЕЛЕГРАМ БОТ НАПОМИНАНИЙ
-Безопасная версия без секретов в коде
+Упрощенная версия без JobQueue для начала
 """
 
 import os
@@ -20,8 +20,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
-    ConversationHandler,
-    JobQueue
+    ConversationHandler
 )
 import gspread
 from google.oauth2.service_account import Credentials
@@ -223,7 +222,7 @@ def get_all_reminders(sheet):
 def delete_from_sheets(sheet, row_number):
     """Удаляет напоминание из таблицы"""
     try:
-        sheet.update(f'A{row_number}:F{row_number}', [['', '', '', '', '', '']])
+        sheet.update(f'A{row_number}:H{row_number}', [['', '', '', '', '', '', '', '']])
         print(f"🗑️ Удалена строка #{row_number}")
         return True
     except Exception as e:
@@ -643,32 +642,6 @@ async def handle_repeat_selection(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("❌ Не удалось сохранить напоминание в таблицу")
         return ConversationHandler.END
 
-    # Планируем отправку
-    if reminder_datetime:
-        job_data = {
-            'text': text,
-            'date': date,
-            'time': time,
-            'repeat': repeat_text,
-            'username': username,
-            'row_number': row_number + 1,  # +1 потому что заголовок
-            'sheet': sheet,
-            'repeat_index': repeat_index
-        }
-        
-        # Планируем основное напоминание
-        context.application.job_queue.run_once(
-            send_scheduled_reminder,
-            when=reminder_datetime,
-            data=job_data,
-            name=f"reminder_{row_number}"
-        )
-        
-        print(f"✅ Запланировано напоминание на {reminder_datetime.strftime('%d.%m.%Y %H:%M')}")
-        
-        # Планируем предварительные напоминания
-        schedule_pre_reminders(context.application.job_queue, job_data, reminder_datetime, repeat_text)
-
     # Отправляем подтверждение
     await query.edit_message_text(
         f"✅ Напоминание сохранено!\n\n"
@@ -677,72 +650,15 @@ async def handle_repeat_selection(update: Update, context: ContextTypes.DEFAULT_
         f"⏰ Время: {time}\n"
         f"🔁 Повторение: {repeat_text}\n"
         f"👤 Добавил: {username}\n\n"
-        f"📊 Сохранено в строку #{row_number}\n"
-        f"⏳ Напоминание будет отправлено в группу в указанное время."
+        f"📊 Сохранено в строку #{row_number}\n\n"
+        f"⚠️  Внимание: JobQueue не настроен.\n"
+        f"📌 Напоминания будут сохраняться в таблицу,\n"
+        f"но автоматическая отправка в группу не работает.\n"
+        f"🔧 Для включения автоматической отправки\n"
+        f"нужно настроить JobQueue."
     )
 
     return ConversationHandler.END
-
-def schedule_pre_reminders(job_queue, job_data, reminder_datetime, repeat_text):
-    """Планирует предварительные напоминания"""
-    try:
-        # За день до
-        if repeat_text == "⏰ За день до":
-            pre_time = reminder_datetime - timedelta(days=1)
-            job_queue.run_once(
-                send_pre_reminder,
-                when=pre_time,
-                data={**job_data, 'pre_text': "за день"},
-                name=f"pre_reminder_{job_data['row_number']}_day"
-            )
-        
-        # За 3 дня до
-        elif repeat_text == "📝 За 3 дня до":
-            pre_time = reminder_datetime - timedelta(days=3)
-            job_queue.run_once(
-                send_pre_reminder,
-                when=pre_time,
-                data={**job_data, 'pre_text': "за 3 дня"},
-                name=f"pre_reminder_{job_data['row_number']}_3days"
-            )
-        
-        # За неделю до
-        elif repeat_text == "🗓️ За неделю до":
-            pre_time = reminder_datetime - timedelta(days=7)
-            job_queue.run_once(
-                send_pre_reminder,
-                when=pre_time,
-                data={**job_data, 'pre_text': "за неделю"},
-                name=f"pre_reminder_{job_data['row_number']}_week"
-            )
-        
-    except Exception as e:
-        print(f"❌ Ошибка планирования предварительного напоминания: {e}")
-
-async def send_pre_reminder(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет предварительное напоминание"""
-    job = context.job
-    data = job.data
-    
-    try:
-        pre_msg = (
-            f"📌 ПРЕДВАРИТЕЛЬНОЕ НАПОМИНАНИЕ\n\n"
-            f"📝 {data['text']}\n"
-            f"📅 Дата: {data['date']}\n"
-            f"⏰ Время: {data['time']}\n"
-            f"⏳ Через: {data['pre_text']}\n"
-            f"👤 Добавил: {data['username']}"
-        )
-        
-        await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID,
-            text=pre_msg
-        )
-        
-        print(f"✅ Отправлено предварительное напоминание: {data['text']} ({data['pre_text']})")
-        
-    except Exception as e:
-        print(f"❌ Ошибка отправки предварительного напоминания: {e}")
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /list - список всех напоминаний"""
@@ -845,149 +761,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update and update.effective_message:
         await update.effective_message.reply_text("❌ Произошла ошибка при обработке команды")
 
-async def send_scheduled_reminder(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет запланированное напоминание ВО ВРЕМЯ СОБЫТИЯ"""
-    job = context.job
-    data = job.data
-
-    try:
-        # Формируем сообщение для группы
-        reminder_msg = (
-            f"⏰ НАПОМИНАНИЕ\n\n"
-            f"📝 {data['text']}\n"
-            f"📅 Дата: {data['date']}\n"
-            f"⏰ Время: {data['time']}\n"
-            f"👤 Добавил: {data['username']}"
-        )
-
-        # Отправляем в группу
-        await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID,
-            text=reminder_msg
-        )
-
-        # Помечаем как отправленное в таблице (колонка H)
-        if data.get('sheet'):
-            update_reminder_status(data['sheet'], data["row_number"], "✅ Отправлено")
-
-        print(f"✅ Отправлено запланированное напоминание: {data['text']}")
-        print(f"   Время отправки: {datetime.now(TIMEZONE).strftime('%d.%m.%Y %H:%M:%S')}")
-
-        # Планируем повторное напоминание, если нужно
-        schedule_repeat_reminder(context.application.job_queue, data)
-
-    except Exception as e:
-        print(f"❌ Ошибка отправки запланированного напоминания: {e}")
-        import traceback
-        traceback.print_exc()
-
-def schedule_repeat_reminder(job_queue, data):
-    """Планирует повторное напоминание в зависимости от типа"""
-    try:
-        repeat_index = data.get('repeat_index', 0)
-        repeat_text = REPEAT_OPTIONS[repeat_index]
-        
-        # Если не повторять - выходим
-        if repeat_index == 0:
-            return
-        
-        # Получаем текущее время напоминания
-        now_utc3 = datetime.now(TIMEZONE)
-        next_time = None
-        
-        # Вычисляем следующее время напоминания
-        if repeat_text == "🔄 Каждый день":
-            next_time = now_utc3 + timedelta(days=1)
-        
-        elif repeat_text == "📅 Каждую неделю":
-            next_time = now_utc3 + timedelta(weeks=1)
-        
-        elif repeat_text == "🎄 Каждый год":
-            next_time = now_utc3 + timedelta(days=365)
-        
-        elif repeat_text.startswith("📆 "):
-            # Дни недели
-            day_name = repeat_text[2:].lower()
-            if day_name in WEEKDAYS_RU:
-                target_weekday = WEEKDAYS_RU[day_name]
-                current_weekday = now_utc3.weekday()
-                days_ahead = (target_weekday - current_weekday) % 7
-                if days_ahead == 0:  # Если сегодня тот же день, то через неделю
-                    days_ahead = 7
-                next_time = now_utc3 + timedelta(days=days_ahead)
-        
-        # Планируем следующее напоминание
-        if next_time:
-            # Обновляем данные для следующего напоминания
-            new_data = data.copy()
-            new_data['date'] = next_time.strftime("%d.%m")
-            new_data['time'] = next_time.strftime("%H:%M")
-            
-            job_queue.run_once(
-                send_scheduled_reminder,
-                when=next_time,
-                data=new_data,
-                name=f"repeat_{data['row_number']}_{int(next_time.timestamp())}"
-            )
-            
-            print(f"✅ Запланировано повторное напоминание на {next_time.strftime('%d.%m.%Y %H:%M')}")
-            
-    except Exception as e:
-        print(f"❌ Ошибка планирования повторного напоминания: {e}")
-
-# ========== ПРОВЕРКА НЕОТПРАВЛЕННЫХ НАПОМИНАНИЙ ==========
-async def check_missed_reminders_on_startup(app):
-    """Проверяет пропущенные напоминания при запуске бота"""
-    await asyncio.sleep(5)  # Ждем 5 секунд после запуска
-    print("🔍 Проверка неотправленных напоминаний...")
-
-    sheet = app.bot_data.get('sheet')
-    if not sheet:
-        print("❌ Нет подключения к Google Sheets")
-        return
-
-    try:
-        reminders = get_all_reminders(sheet)
-        now_utc3 = datetime.now(TIMEZONE)
-        
-        for i, reminder in enumerate(reminders, start=2):  # i=2 т.к. заголовок в строке 1
-            if len(reminder) >= 8:
-                status = reminder[7] if len(reminder) > 7 else ""
-                
-                # Если напоминание еще не отправлено
-                if status != "✅ Отправлено":
-                    # Проверяем время напоминания (столбец G)
-                    try:
-                        reminder_time_str = reminder[6] if len(reminder) > 6 else ""
-                        if reminder_time_str:
-                            reminder_datetime = datetime.strptime(reminder_time_str, "%d.%m.%Y %H:%M")
-                            reminder_datetime = TIMEZONE.localize(reminder_datetime)
-                            
-                            # Если время напоминания уже прошло
-                            if reminder_datetime <= now_utc3:
-                                # Отправляем сейчас
-                                job_data = {
-                                    'text': reminder[0],
-                                    'date': reminder[1],
-                                    'time': reminder[2],
-                                    'repeat': reminder[3],
-                                    'username': reminder[4],
-                                    'row_number': i,
-                                    'sheet': sheet
-                                }
-                                
-                                # Отправляем немедленно
-                                await send_scheduled_reminder(app.bot_data['job_context'])
-                                
-                                print(f"✅ Отправлено пропущенное напоминание из строки {i}")
-                    except Exception as e:
-                        print(f"⚠️ Ошибка обработки пропущенного напоминания: {e}")
-                        
-        print("✅ Проверка завершена")
-        
-    except Exception as e:
-        print(f"❌ Ошибка при проверке неотправленных напоминаний: {e}")
-
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
 def main():
     """Основная функция для запуска бота"""
@@ -1019,7 +792,6 @@ def main():
 
     # Сохраняем объект sheet в данные бота
     application.bot_data['sheet'] = sheet
-    application.bot_data['job_context'] = ContextTypes.DEFAULT_TYPE
 
     # Создаем ConversationHandler для диалога добавления
     conv_handler = ConversationHandler(
@@ -1034,6 +806,8 @@ def main():
             ]
         },
         fallbacks=[CommandHandler('cancel', cancel_command)],
+        per_chat=True,
+        per_user=True,
         per_message=False
     )
 
@@ -1055,12 +829,8 @@ def main():
     application.add_error_handler(error_handler)
 
     print("✅ Бот инициализирован. Запускаю...")
-
-    # Добавляем проверку при запуске
-    application.job_queue.run_once(
-        lambda ctx: check_missed_reminders_on_startup(ctx.application),
-        when=5
-    )
+    print("⚠️  JobQueue не настроен. Напоминания сохраняются в таблицу,")
+    print("   но автоматическая отправка в группу не работает.")
 
     # Запускаем бота
     application.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=None)
